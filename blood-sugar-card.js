@@ -240,6 +240,46 @@ class BloodSugarCard extends HTMLElement {
       .join(" ");
   }
 
+  _popupStats() {
+    if (!this._popupHistory || this._popupHistory.length < 2) {
+      return null;
+    }
+    const values = this._popupHistory
+      .map((item) => parseFloat(item.s))
+      .filter((val) => !Number.isNaN(val));
+    if (values.length < 2) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    return { min, max, span, values };
+  }
+
+  _popupSegments(width, height) {
+    const stats = this._popupStats();
+    if (!stats) return [];
+    const { min, span, values } = stats;
+    const low = this._config.low_threshold;
+    const high = this._config.high_threshold;
+    const segments = [];
+    let current = null;
+
+    values.forEach((val, idx) => {
+      const x = (idx / (values.length - 1)) * width;
+      const y = height - ((val - min) / span) * height;
+      let bucket = "range";
+      if (val <= low) bucket = "low";
+      else if (val >= high) bucket = "high";
+
+      if (!current || current.bucket !== bucket) {
+        current = { bucket, points: [] };
+        segments.push(current);
+      }
+      current.points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    });
+
+    return segments;
+  }
+
   _trendIcon(trend) {
     switch (trend) {
       case "double_up":
@@ -457,6 +497,7 @@ class BloodSugarCard extends HTMLElement {
           border-radius: 12px;
           padding: 12px;
           box-sizing: border-box;
+          position: relative;
         }
         .modal-graph svg {
           width: 100%;
@@ -464,12 +505,33 @@ class BloodSugarCard extends HTMLElement {
         }
         .modal-graph polyline {
           fill: none;
-          stroke: rgba(255, 255, 255, 0.9);
           stroke-width: 2.5;
+        }
+        .modal-graph .line-range {
+          stroke: rgba(255, 255, 255, 0.9);
+        }
+        .modal-graph .line-low {
+          stroke: var(--bs-low, #ff8a80);
+        }
+        .modal-graph .line-high {
+          stroke: var(--bs-high, #ffb74d);
         }
         .modal-graph line {
           stroke: rgba(255, 255, 255, 0.2);
           stroke-width: 1;
+        }
+        .axis-labels {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 8px;
+          font-size: 11px;
+          opacity: 0.75;
+        }
+        .axis-labels span {
+          min-width: 60px;
+        }
+        .axis-labels .right {
+          text-align: right;
         }
         .modal-empty {
           font-size: 14px;
@@ -507,9 +569,28 @@ class BloodSugarCard extends HTMLElement {
               ? `<div class="modal-graph">
                    <svg viewBox="0 0 480 200" preserveAspectRatio="none" aria-hidden="true">
                      <line x1="0" y1="100" x2="480" y2="100"></line>
-                     <polyline points="${this._popupPoints(480, 200)}" />
+                     ${this._popupSegments(480, 200)
+                       .map((segment) => {
+                         const cls = segment.bucket === "low"
+                           ? "line-low"
+                           : segment.bucket === "high"
+                             ? "line-high"
+                             : "line-range";
+                         return `<polyline class="${cls}" points="${segment.points.join(" ")}" />`;
+                       })
+                       .join("")}
                    </svg>
-                 </div>`
+                 </div>
+                 ${(() => {
+                   const stats = this._popupStats();
+                   if (!stats) return "";
+                   const min = stats.min.toFixed(1);
+                   const max = stats.max.toFixed(1);
+                   return `<div class="axis-labels">
+                     <span>Min ${min}</span>
+                     <span class="right">Max ${max}</span>
+                   </div>`;
+                 })()}`
               : `<div class="modal-empty">No recent history available.</div>`}
           </div>
         </div>
