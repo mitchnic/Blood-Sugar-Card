@@ -256,6 +256,12 @@ class BloodSugarCard extends HTMLElement {
     return { min, max, span, values, startTime, endTime };
   }
 
+  _formatAxisTime(ts) {
+    if (!ts) return "";
+    const date = new Date(ts);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
 
   _popupSegments(width, height) {
     const stats = this._popupStats();
@@ -689,8 +695,3 @@ try {
 } catch (e) {
   // Ignore console issues in restricted environments
 }
-  _formatAxisTime(ts) {
-    if (!ts) return "";
-    const date = new Date(ts);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
