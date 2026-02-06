@@ -12,6 +12,8 @@ class BloodSugarCard extends HTMLElement {
     this._config = null;
     this._historyCache = null;
     this._historyFetchedAt = 0;
+    this._popupOpen = false;
+    this._popupHistory = null;
   }
 
   setConfig(config) {
@@ -34,6 +36,7 @@ class BloodSugarCard extends HTMLElement {
     this._config = {
       name: "Blood Sugar",
       history_minutes: 30,
+      popup_hours: 3,
       trend_window: 3,
       low_threshold: 4.0,
       high_threshold: 10.1,
@@ -62,6 +65,9 @@ class BloodSugarCard extends HTMLElement {
   }
 
   async _fetchHistory() {
+    if (!this._hass || typeof this._hass.callWS !== "function") {
+      return;
+    }
     const entityId = this._config.entity;
     const endTime = new Date();
     const startTime = new Date(endTime.getTime() - this._config.history_minutes * 60 * 1000);
@@ -81,7 +87,29 @@ class BloodSugarCard extends HTMLElement {
     this._render();
   }
 
+  async _fetchPopupHistory() {
+    if (!this._hass || typeof this._hass.callWS !== "function") {
+      return;
+    }
+    const entityId = this._config.entity;
+    const endTime = new Date();
+    const startTime = new Date(endTime.getTime() - this._config.popup_hours * 60 * 60 * 1000);
+
+    const data = await this._hass.callWS({
+      type: "history/history_during_period",
+      start_time: startTime.toISOString(),
+      end_time: endTime.toISOString(),
+      entity_ids: [entityId],
+      minimal_response: true,
+      no_attributes: true,
+    });
+
+    const series = (data && data[entityId]) ? data[entityId] : [];
+    this._popupHistory = series;
+  }
+
   _getLatestValue() {
+    if (!this._hass || !this._hass.states) return null;
     const stateObj = this._hass.states[this._config.entity];
     if (!stateObj) return null;
     const value = parseFloat(stateObj.state);
@@ -89,7 +117,15 @@ class BloodSugarCard extends HTMLElement {
     return value;
   }
 
+  _formatPopupTime(entry) {
+    const ts = this._entryTime(entry);
+    if (!ts) return "Unknown time";
+    const date = new Date(ts);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
   _minutesSinceLast() {
+    if (!this._hass || !this._hass.states) return null;
     const stateObj = this._hass.states[this._config.entity];
     if (stateObj && (stateObj.last_updated || stateObj.last_changed)) {
       const ts = stateObj.last_updated || stateObj.last_changed;
@@ -167,6 +203,26 @@ class BloodSugarCard extends HTMLElement {
   _sparklinePoints(width, height) {
     if (!this._historyCache || this._historyCache.length < 2) return "";
     const values = this._historyCache
+      .map((item) => parseFloat(item.s))
+      .filter((val) => !Number.isNaN(val));
+    if (values.length < 2) return "";
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+
+    return values
+      .map((val, idx) => {
+        const x = (idx / (values.length - 1)) * width;
+        const y = height - ((val - min) / span) * height;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+  }
+
+  _popupPoints(width, height) {
+    if (!this._popupHistory || this._popupHistory.length < 2) return "";
+    const values = this._popupHistory
       .map((item) => parseFloat(item.s))
       .filter((val) => !Number.isNaN(val));
     if (values.length < 2) return "";
@@ -291,6 +347,8 @@ class BloodSugarCard extends HTMLElement {
           border-radius: 18px;
           padding: 18px 20px;
           box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+          cursor: pointer;
+          position: relative;
         }
         .title {
           font-size: 14px;
@@ -351,6 +409,72 @@ class BloodSugarCard extends HTMLElement {
           font-size: 16px;
           opacity: 0.85;
         }
+        .overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.55);
+          display: ${this._popupOpen ? "flex" : "none"};
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+        }
+        .modal {
+          background: #111;
+          color: #fff;
+          border-radius: 16px;
+          width: min(520px, 90vw);
+          max-height: 80vh;
+          overflow: hidden;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        }
+        .modal-header {
+          padding: 16px 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .modal-title {
+          font-size: 14px;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          opacity: 0.85;
+        }
+        .modal-close {
+          background: transparent;
+          border: 0;
+          color: #fff;
+          font-size: 18px;
+          cursor: pointer;
+        }
+        .modal-body {
+          padding: 16px 20px 22px;
+        }
+        .modal-graph {
+          width: 100%;
+          height: 220px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+          border-radius: 12px;
+          padding: 12px;
+          box-sizing: border-box;
+        }
+        .modal-graph svg {
+          width: 100%;
+          height: 100%;
+        }
+        .modal-graph polyline {
+          fill: none;
+          stroke: rgba(255, 255, 255, 0.9);
+          stroke-width: 2.5;
+        }
+        .modal-graph line {
+          stroke: rgba(255, 255, 255, 0.2);
+          stroke-width: 1;
+        }
+        .modal-empty {
+          font-size: 14px;
+          opacity: 0.8;
+        }
       </style>
       <div class="card">
         <div class="title">${title}</div>
@@ -372,7 +496,59 @@ class BloodSugarCard extends HTMLElement {
           </svg>
         </div>
       </div>
+      <div class="overlay">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-header">
+            <div class="modal-title">Last ${this._config.popup_hours} Hours</div>
+            <button class="modal-close" aria-label="Close">✕</button>
+          </div>
+          <div class="modal-body">
+            ${this._popupHistory && this._popupHistory.length
+              ? `<div class="modal-graph">
+                   <svg viewBox="0 0 480 200" preserveAspectRatio="none" aria-hidden="true">
+                     <line x1="0" y1="100" x2="480" y2="100"></line>
+                     <polyline points="${this._popupPoints(480, 200)}" />
+                   </svg>
+                 </div>`
+              : `<div class="modal-empty">No recent history available.</div>`}
+          </div>
+        </div>
+      </div>
     `;
+
+    const card = this.shadowRoot.querySelector(".card");
+    if (card) {
+      card.onclick = async () => {
+        if (this._popupOpen) return;
+        this._popupOpen = true;
+        this._popupHistory = null;
+        this._render();
+        try {
+          await this._fetchPopupHistory();
+        } catch (e) {
+          this._popupHistory = [];
+        }
+        this._render();
+      };
+    }
+
+    const overlay = this.shadowRoot.querySelector(".overlay");
+    if (overlay) {
+      overlay.onclick = (event) => {
+        if (event.target === overlay) {
+          this._popupOpen = false;
+          this._render();
+        }
+      };
+    }
+
+    const close = this.shadowRoot.querySelector(".modal-close");
+    if (close) {
+      close.onclick = () => {
+        this._popupOpen = false;
+        this._render();
+      };
+    }
   }
 
   getCardSize() {
