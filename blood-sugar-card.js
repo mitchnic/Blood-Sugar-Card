@@ -248,10 +248,12 @@ class BloodSugarCard extends HTMLElement {
       .map((item) => parseFloat(item.s))
       .filter((val) => !Number.isNaN(val));
     if (values.length < 2) return null;
+    const startTime = this._entryTime(this._popupHistory[0]);
+    const endTime = this._entryTime(this._popupHistory[this._popupHistory.length - 1]);
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = max - min || 1;
-    return { min, max, span, values };
+    return { min, max, span, values, startTime, endTime };
   }
 
   _popupSegments(width, height) {
@@ -533,6 +535,30 @@ class BloodSugarCard extends HTMLElement {
         .axis-labels .right {
           text-align: right;
         }
+        .axis-grid {
+          display: grid;
+          grid-template-columns: 48px 1fr;
+          gap: 10px;
+        }
+        .y-axis {
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          height: 220px;
+          font-size: 11px;
+          opacity: 0.75;
+          text-align: right;
+          padding-top: 4px;
+          padding-bottom: 4px;
+          box-sizing: border-box;
+        }
+        .x-axis {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 6px;
+          font-size: 11px;
+          opacity: 0.75;
+        }
         .modal-empty {
           font-size: 14px;
           opacity: 0.8;
@@ -566,31 +592,43 @@ class BloodSugarCard extends HTMLElement {
           </div>
           <div class="modal-body">
             ${this._popupHistory && this._popupHistory.length
-              ? `<div class="modal-graph">
-                   <svg viewBox="0 0 480 200" preserveAspectRatio="none" aria-hidden="true">
-                     <line x1="0" y1="100" x2="480" y2="100"></line>
-                     ${this._popupSegments(480, 200)
-                       .map((segment) => {
-                         const cls = segment.bucket === "low"
-                           ? "line-low"
-                           : segment.bucket === "high"
-                             ? "line-high"
-                             : "line-range";
-                         return `<polyline class="${cls}" points="${segment.points.join(" ")}" />`;
-                       })
-                       .join("")}
-                   </svg>
-                 </div>
-                 ${(() => {
-                   const stats = this._popupStats();
-                   if (!stats) return "";
-                   const min = stats.min.toFixed(1);
-                   const max = stats.max.toFixed(1);
-                   return `<div class="axis-labels">
-                     <span>Min ${min}</span>
-                     <span class="right">Max ${max}</span>
-                   </div>`;
-                 })()}`
+              ? `${(() => {
+                const stats = this._popupStats();
+                if (!stats) return "";
+                const min = stats.min.toFixed(1);
+                const max = stats.max.toFixed(1);
+                const mid = ((stats.min + stats.max) / 2).toFixed(1);
+                const start = this._formatAxisTime(stats.startTime);
+                const end = this._formatAxisTime(stats.endTime);
+                return `<div class="axis-grid">
+                  <div class="y-axis">
+                    <div>${max}</div>
+                    <div>${mid}</div>
+                    <div>${min}</div>
+                  </div>
+                  <div>
+                    <div class="modal-graph">
+                      <svg viewBox="0 0 480 200" preserveAspectRatio="none" aria-hidden="true">
+                        <line x1="0" y1="100" x2="480" y2="100"></line>
+                        ${this._popupSegments(480, 200)
+                          .map((segment) => {
+                            const cls = segment.bucket === "low"
+                              ? "line-low"
+                              : segment.bucket === "high"
+                                ? "line-high"
+                                : "line-range";
+                            return `<polyline class="${cls}" points="${segment.points.join(" ")}" />`;
+                          })
+                          .join("")}
+                      </svg>
+                    </div>
+                    <div class="x-axis">
+                      <span>${start}</span>
+                      <span>${end}</span>
+                    </div>
+                  </div>
+                </div>`;
+              })()}`
               : `<div class="modal-empty">No recent history available.</div>`}
           </div>
         </div>
@@ -650,3 +688,8 @@ try {
 } catch (e) {
   // Ignore console issues in restricted environments
 }
+  _formatAxisTime(ts) {
+    if (!ts) return "";
+    const date = new Date(ts);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
