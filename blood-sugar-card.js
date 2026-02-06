@@ -256,6 +256,7 @@ class BloodSugarCard extends HTMLElement {
     return { min, max, span, values, startTime, endTime };
   }
 
+
   _popupSegments(width, height) {
     const stats = this._popupStats();
     if (!stats) return [];
